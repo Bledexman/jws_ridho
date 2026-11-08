@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0f3d2e">
+<title>JWS Bluetooth</title>
+<style>
+  :root{
+    --bg:#f3f5f2; --card:#ffffff; --ink:#1b2a24; --muted:#6b7a73; --line:#e2e7e3;
+    --pri:#0f6b4b; --pri-ink:#ffffff; --pri-soft:#e3f1ea; --warn:#b4541a; --bad:#b3261e;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{position:sticky;top:0;z-index:5;background:#0f3d2e;color:#fff;
+    padding:calc(10px + env(safe-area-inset-top)) 16px 12px;display:flex;align-items:center;gap:10px}
+  header h1{font-size:18px;margin:0;flex:1;font-weight:650}
+  #backBtn{background:none;border:0;color:#fff;font-size:22px;padding:0 6px 0 0;display:none;cursor:pointer}
+  .pill{font-size:12px;padding:4px 10px;border-radius:999px;background:#ffffff22;white-space:nowrap}
+  .pill.on{background:#2fbf71}
+  main{max-width:640px;margin:0 auto;padding:14px 14px 40px}
+  .card{background:var(--card);border-radius:var(--radius);padding:14px;margin-bottom:12px;
+    box-shadow:0 1px 2px #0000000f;border:1px solid var(--line)}
+  .card h2{font-size:15px;margin:0 0 10px;color:var(--pri)}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 6px;
+    text-align:center;font-size:13px;cursor:pointer;color:var(--ink)}
+  .tile .ic{font-size:26px;display:block;margin-bottom:4px}
+  .tile:active{background:var(--pri-soft)}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input,select,textarea{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);
+    border-radius:10px;background:#fbfcfb;color:var(--ink)}
+  textarea{min-height:76px;resize:vertical}
+  .row{display:flex;gap:10px}.row>*{flex:1}
+  .btns{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+  button.b{flex:1;min-width:120px;font:inherit;font-weight:600;padding:11px 12px;border-radius:10px;border:0;
+    background:var(--pri);color:var(--pri-ink);cursor:pointer}
+  button.b.sec{background:var(--pri-soft);color:var(--pri)}
+  button.b:disabled{opacity:.45}
+  .count{font-size:12px;color:var(--muted);text-align:right;margin-top:2px}
+  .sched{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center}
+  .sched div{background:var(--pri-soft);border-radius:10px;padding:8px 2px}
+  .sched b{display:block;font-size:17px}
+  .sched span{font-size:11px;color:var(--muted)}
+  .big{font-size:34px;font-weight:700;letter-spacing:1px;text-align:center;font-variant-numeric:tabular-nums}
+  .muted{color:var(--muted);font-size:13px}
+  .banner{background:#fff4e5;border:1px solid #f1c48b;color:#6b3a0b;border-radius:var(--radius);padding:12px;margin-bottom:12px;font-size:14px}
+  .sw{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)}
+  .sw:last-child{border-bottom:0}
+  .sw input{width:auto;transform:scale(1.3)}
+  #log{background:#0d1512;color:#9fe3bd;font:12px/1.45 ui-monospace,Menlo,monospace;border-radius:10px;
+    padding:10px;height:260px;overflow:auto;white-space:pre-wrap}
+  .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);
+    background:#1b2a24;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;transition:.25s;pointer-events:none}
+  .toast.show{opacity:1}
+  .screen{display:none}.screen.active{display:block}
+</style>
+</head>
+<body>
+<header>
+  <button id="backBtn" aria-label="Kembali">&#8249;</button>
+  <h1 id="title">JWS Bluetooth</h1>
+  <span id="status" class="pill">Tidak terhubung</span>
+</header>
+
+<main>
+  <div id="noBle" class="banner" style="display:none">
+    Browser ini belum mendukung Web Bluetooth.<br>
+    <b>iPhone:</b> buka halaman ini di aplikasi <b>Bluefy – Web BLE Browser</b> (gratis di App Store).<br>
+    <b>Laptop:</b> gunakan Google Chrome atau Microsoft Edge.
+  </div>
+
+  <!-- ================= HOME ================= -->
+  <section class="screen active" id="s-home">
+    <div class="card">
+      <div class="btns" style="margin-top:0">
+        <button class="b" id="btnConnect">Hubungkan Bluetooth</button>
+        <button class="b sec" id="btnRead" disabled>Baca dari JWS</button>
+      </div>
+      <p class="muted" id="devInfo" style="margin:10px 0 0">Nyalakan JWS, lalu tekan “Hubungkan Bluetooth” dan pilih <b>JWS-ESP32C3</b>.</p>
+    </div>
+
+    <div class="card">
+      <h2>Aksi cepat</h2>
+      <div class="btns" style="margin-top:0">
+        <button class="b" id="qSync">🕒 Sinkron Jam HP</button>
+        <button class="b" id="qGps">📍 Kirim Lokasi GPS</button>
+      </div>
+      <p class="muted" id="qInfo" style="margin:10px 0 0">Jam dan lokasi diambil langsung dari HP lalu dikirim ke JWS.</p>
+    </div>
+
+    <div class="card">
+      <h2>Jam di JWS</h2>
+      <div class="big" id="devClock">--:--:--</div>
+      <p class="muted" id="devDate" style="text-align:center;margin:4px 0 12px">-</p>
+      <div class="sched" id="sched"></div>
+    </div>
+
+    <div class="grid">
+      <div class="tile" data-go="waktu"><span class="ic">🕒</span>Waktu &amp; Tanggal</div>
+      <div class="tile" data-go="lokasi"><span class="ic">📍</span>Lokasi</div>
+      <div class="tile" data-go="masjid"><span class="ic">🕌</span>Nama Masjid</div>
+      <div class="tile" data-go="runtext"><span class="ic">📝</span>Running Text</div>
+      <div class="tile" data-go="iqomah"><span class="ic">⏱️</span>Iqomah</div>
+      <div class="tile" data-go="jadwal"><span class="ic">🗓️</span>Penyesuaian Jadwal</div>
+      <div class="tile" data-go="sistem"><span class="ic">⚙️</span>Setting Sistem</div>
+      <div class="tile" data-go="kecerahan"><span class="ic">🔆</span>Kecerahan</div>
+      <div class="tile" data-go="serial"><span class="ic">⌨️</span>Serial</div>
+    </div>
+    <p class="muted" style="text-align:center;margin-top:16px">Protokol sama dengan aplikasi Android “JWS Bluetooth”.<br>Program JWS: Modifikasi by M. Ridho | 2026.</p>
+  </section>
+
+  <!-- ================= WAKTU & TANGGAL ================= -->
+  <section class="screen" id="s-waktu" data-title="Waktu & Tanggal">
+    <div class="card">
+      <h2>Sinkron dengan jam HP / laptop</h2>
+      <div class="big" id="phoneClock">--:--:--</div>
+      <p class="muted" id="phoneDate" style="text-align:center;margin:4px 0 0">-</p>
+      <div class="btns"><button class="b" id="btnSync">Sinkronkan Waktu</button></div>
+    </div>
+    <div class="card">
+      <h2>Atur manual</h2>
+      <div class="row">
+        <div><label>Tanggal</label><input type="date" id="mDate"></div>
+        <div><label>Jam</label><input type="time" id="mTime" step="1"></div>
+      </div>
+      <div class="btns"><button class="b" id="btnManualTime">Kirim Waktu Manual</button></div>
+    </div>
+  </section>
+
+  <!-- ================= LOKASI ================= -->
+  <section class="screen" id="s-lokasi" data-title="Lokasi">
+    <div class="card">
+      <div class="row">
+        <div><label>Lintang (Latitude)</label><input id="NLA" inputmode="decimal" placeholder="-6.39524"></div>
+        <div><label>Bujur (Longitude)</label><input id="NLO" inputmode="decimal" placeholder="106.80256"></div>
+      </div>
+      <div class="row">
+        <div><label>Ketinggian (meter)</label><input id="NAL" inputmode="decimal" placeholder="45"></div>
+        <div><label>Zona waktu (GMT)</label>
+          <select id="NTZ">
+            <option value="7">+7 WIB</option><option value="8">+8 WITA</option><option value="9">+9 WIT</option>
+            <option value="custom">Manual…</option>
+          </select>
+        </div>
+      </div>
+      <div id="tzCustomWrap" style="display:none"><label>GMT manual</label><input id="tzCustom" inputmode="decimal" placeholder="7"></div>
+      <p class="muted" id="gpsInfo"></p>
+      <div class="btns">
+        <button class="b sec" id="btnGps">Ambil dari GPS</button>
+        <button class="b" id="btnLokasi">Kirim Lokasi</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= MASJID ================= -->
+  <section class="screen" id="s-masjid" data-title="Nama Masjid">
+    <div class="card">
+      <label>Jenis</label>
+      <select id="NMT"><option value="1">Masjid</option><option value="2">Musholla</option><option value="3">Surau</option><option value="4">Langgar</option></select>
+      <div class="btns"><button class="b" id="btnJenis">Kirim Jenis</button></div>
+    </div>
+    <div class="card">
+      <label>Nama</label><input id="mNama" maxlength="74" placeholder="Al-Ikhlas">
+      <label>Alamat</label><input id="mAlamat" maxlength="74" placeholder="Jl. ...">
+      <div class="count" id="cmnCount">0/74</div>
+      <div class="btns">
+        <button class="b sec" data-clear="mNama,mAlamat">Hapus</button>
+        <button class="b" id="btnNama">Kirim Nama &amp; Alamat</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= RUNNING TEXT ================= -->
+  <section class="screen" id="s-runtext" data-title="Running Text">
+    <div class="card"><h2>Info 1</h2><textarea id="CN1" maxlength="149"></textarea><div class="count"></div>
+      <div class="btns"><button class="b sec" data-clear="CN1">Hapus</button><button class="b" data-send="CN1">Kirim</button></div></div>
+    <div class="card"><h2>Info 2</h2><textarea id="CN2" maxlength="149"></textarea><div class="count"></div>
+      <div class="btns"><button class="b sec" data-clear="CN2">Hapus</button><button class="b" data-send="CN2">Kirim</button></div></div>
+    <div class="card"><h2>Info 3</h2><textarea id="CN3" maxlength="149"></textarea><div class="count"></div>
+      <div class="btns"><button class="b sec" data-clear="CN3">Hapus</button><button class="b" data-send="CN3">Kirim</button></div></div>
+    <div class="card"><h2>Teks sebelum sholat</h2><textarea id="CSM" maxlength="149"></textarea><div class="count"></div>
+      <div class="btns"><button class="b sec" data-clear="CSM">Hapus</button><button class="b" data-send="CSM">Kirim</button></div></div>
+    <div class="card"><h2>Teks sebelum Jum'at</h2><textarea id="CJM" maxlength="149"></textarea><div class="count"></div>
+      <div class="btns"><button class="b sec" data-clear="CJM">Hapus</button><button class="b" data-send="CJM">Kirim</button></div></div>
+  </section>
+
+  <!-- ================= IQOMAH ================= -->
+  <section class="screen" id="s-iqomah" data-title="Setting Iqomah">
+    <div class="card">
+      <p class="muted" style="margin-top:0">Jeda adzan ke iqomah (menit)</p>
+      <div class="row"><div><label>Subuh</label><input id="NI1" type="number" min="0" max="60"></div>
+        <div><label>Dzuhur</label><input id="NI4" type="number" min="0" max="60"></div></div>
+      <div class="row"><div><label>Ashar</label><input id="NI5" type="number" min="0" max="60"></div>
+        <div><label>Maghrib</label><input id="NI6" type="number" min="0" max="60"></div></div>
+      <div class="row"><div><label>Isya</label><input id="NI7" type="number" min="0" max="60"></div><div></div></div>
+      <div class="btns">
+        <button class="b sec" id="btnDefIqomah">Default</button>
+        <button class="b" data-group="NI1,NI4,NI5,NI6,NI7">Kirim</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= PENYESUAIAN JADWAL ================= -->
+  <section class="screen" id="s-jadwal" data-title="Penyesuaian Jadwal">
+    <div class="card">
+      <div class="row">
+        <div><label>Ihtiyati (menit)</label><input id="NIH" type="number" min="0" max="10"></div>
+        <div><label>Koreksi Hijriyah (hari)</label><input id="NCH" type="number" min="-3" max="3"></div>
+      </div>
+      <p class="muted">Koreksi tiap waktu sholat (menit, boleh negatif)</p>
+      <div class="row"><div><label>Subuh</label><input id="NIS" type="number" min="-30" max="30"></div>
+        <div><label>Dzuhur</label><input id="NIL" type="number" min="-30" max="30"></div></div>
+      <div class="row"><div><label>Ashar</label><input id="NIA" type="number" min="-30" max="30"></div>
+        <div><label>Maghrib</label><input id="NIM" type="number" min="-30" max="30"></div></div>
+      <div class="row"><div><label>Isya</label><input id="NII" type="number" min="-30" max="30"></div><div></div></div>
+      <div class="btns">
+        <button class="b sec" id="btnDefJadwal">Default</button>
+        <button class="b" data-group="NIH,NCH,NIS,NIL,NIA,NIM,NII">Kirim</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SISTEM ================= -->
+  <section class="screen" id="s-sistem" data-title="Setting Sistem">
+    <div class="card">
+      <div class="row">
+        <div><label>Lama sholat (menit)</label><input id="NSO" type="number" min="1" max="60"></div>
+        <div><label>Lama Jum'at (menit)</label><input id="NJM" type="number" min="1" max="90"></div>
+      </div>
+      <div style="margin-top:8px">
+        <div class="sw">Bunyi buzzer <input type="checkbox" id="NBZ"></div>
+        <div class="sw">Tampilkan Imsak <input type="checkbox" id="NSI"></div>
+        <div class="sw">Tampilkan Terbit <input type="checkbox" id="NST"></div>
+        <div class="sw">Tampilkan Dhuha <input type="checkbox" id="NSU"></div>
+      </div>
+      <div class="btns">
+        <button class="b sec" id="btnDefSistem">Default</button>
+        <button class="b" data-group="NSO,NJM,NBZ,NSI,NST,NSU">Kirim</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= KECERAHAN ================= -->
+  <section class="screen" id="s-kecerahan" data-title="Kecerahan">
+    <div class="card">
+      <div class="big"><span id="blVal">20</span>%</div>
+      <input type="range" id="NBL" min="1" max="100" value="20" style="padding:0;margin-top:10px">
+      <div class="btns">
+        <button class="b sec" id="btnDefBL">Default</button>
+        <button class="b" data-group="NBL">Kirim</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SERIAL ================= -->
+  <section class="screen" id="s-serial" data-title="Serial">
+    <div class="card">
+      <div id="log"></div>
+      <div class="row" style="margin-top:10px">
+        <input id="rawCmd" placeholder="contoh: RPR  atau  NIH2" autocapitalize="characters">
+        <button class="b" id="btnRaw" style="flex:0 0 90px;min-width:0">Kirim</button>
+      </div>
+      <div class="btns"><button class="b sec" id="btnClearLog">Hapus Log</button></div>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+// ===================== BLE (Nordic UART Service) =====================
+const NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const NUS_RX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // tulis ke JWS
+const NUS_TX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // notifikasi dari JWS
+let device = null, rxChar = null, rxBuf = '', writeChain = Promise.resolve();
+
+const $ = id => document.getElementById(id);
+const SHOLAT = ['Imsak','Subuh','Terbit','Dhuha','Dzuhur','Ashar','Maghrib','Isya'];
+const HARI = ['','Ahad','Senin','Selasa','Rabu','Kamis',"Jum'at",'Sabtu'];
+const BULAN_H = ['Muharram','Shafar','Rabiul Awal','Rabiul Akhir','Jumadil Awal','Jumadil Akhir','Rajab',"Sya'ban",'Ramadhan','Syawal',"Dzulqa'dah",'Dzulhijjah'];
+
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),1800); }
+function log(dir, s){ const l=$('log'); l.textContent += `${dir} ${s}\n`; l.scrollTop=l.scrollHeight; }
+
+function setConnected(on){
+  $('status').textContent = on ? 'Terhubung' : 'Tidak terhubung';
+  $('status').classList.toggle('on', on);
+  $('btnConnect').textContent = on ? 'Putuskan' : 'Hubungkan Bluetooth';
+  $('btnRead').disabled = !on;
+  $('devInfo').innerHTML = on ? `Terhubung ke <b>${device.name||'JWS'}</b>` :
+    'Nyalakan JWS, lalu tekan “Hubungkan Bluetooth” dan pilih <b>JWS-ESP32C3</b>.';
+}
+
+async function connect(){
+  if (device && device.gatt.connected){ device.gatt.disconnect(); return; }
+  try{
+    device = await navigator.bluetooth.requestDevice({
+      filters:[{namePrefix:'JWS'},{services:[NUS]}], optionalServices:[NUS]});
+    device.addEventListener('gattserverdisconnected', ()=>{ setConnected(false); toast('Bluetooth terputus'); });
+    const server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(NUS);
+    rxChar = await svc.getCharacteristic(NUS_RX);
+    const tx = await svc.getCharacteristic(NUS_TX);
+    await tx.startNotifications();
+    tx.addEventListener('characteristicvaluechanged', e=>onData(new TextDecoder().decode(e.target.value)));
+    setConnected(true); toast('Terhubung');
+    send(['RPR']);
+  }catch(e){ if(e.name!=='NotFoundError') toast('Gagal: '+e.message); }
+}
+
+// Kirim beberapa baris perintah; dipecah 20 byte agar aman di semua HP
+function send(lines, quiet){
+  if (!device || !device.gatt.connected){ toast('Belum terhubung ke JWS'); return false; }
+  for (const line of lines){
+    const data = new TextEncoder().encode(line + '\n');
+    writeChain = writeChain.then(async ()=>{
+      for (let i=0;i<data.length;i+=20){
+        const part = data.slice(i,i+20);
+        if (rxChar.writeValueWithResponse) await rxChar.writeValueWithResponse(part);
+        else await rxChar.writeValue(part);
+      }
+      log('→', line);
+      await new Promise(r=>setTimeout(r,60));
+    }).catch(e=>{ toast('Gagal kirim: '+e.message); });
+  }
+  if (!quiet) writeChain = writeChain.then(()=>{ toast('Terkirim'); });
+  return true;
+}
+
+function onData(chunk){
+  rxBuf += chunk;
+  let i;
+  while ((i = rxBuf.indexOf('\n')) >= 0){
+    const line = rxBuf.slice(0,i).replace(/\r$/,''); rxBuf = rxBuf.slice(i+1);
+    if (line) handleLine(line);
+  }
+}
+
+let devTime = null, devTimeAt = 0;
+function handleLine(line){
+  log('←', line);
+  const k = line.slice(0,3), v = line.slice(3);
+  if (k==='TIM'){            // dd/mm/yyyy HH:MM:SS D
+    const m = v.match(/(\d+)\/(\d+)\/(\d+) (\d+):(\d+):(\d+) (\d)/);
+    if (m){ devTime = new Date(+m[3],m[2]-1,+m[1],+m[4],+m[5],+m[6]); devTimeAt = Date.now();
+      $('devDate').dataset.hari = HARI[+m[7]] || ''; }
+  } else if (k==='JWS'){
+    const t = v.split(',');
+    $('sched').innerHTML = t.map((x,i)=>`<div><b>${x}</b><span>${SHOLAT[i]}</span></div>`).join('');
+  } else if (k==='HIJ'){
+    const [d,mo,y] = v.split(',').map(Number);
+    $('devDate').dataset.hijri = `${d} ${BULAN_H[mo-1]||''} ${y} H`;
+  } else if (k==='CMN'){
+    if ($('mNama').dataset.dirty || $('mAlamat').dataset.dirty) return;
+    $('mNama').value = v; $('mAlamat').value=''; updCount();
+  } else if (/^C(N1|N2|N3|SM|JM)$/.test(k)){
+    if ($(k).dataset.dirty) return;
+    $(k).value = v; updCount();
+  } else if (k[0]==='N' && $(k)){
+    const el = $(k);
+    if (el.dataset.dirty) return;
+    if (el.type==='checkbox') el.checked = v.trim()==='1';
+    else if (k==='NTZ'){ setTZ(parseFloat(v)); }
+    else el.value = (k==='NLA'||k==='NLO') ? parseFloat(v) : (k==='NAL' ? parseFloat(v) : parseInt(v));
+    if (k==='NBL') $('blVal').textContent = el.value;
+  }
+}
+
+// ===================== Helpers =====================
+const pad = n => String(n).padStart(2,'0');
+function sdtFrom(d){   // SDT ddMMyyHHmmss D (1=Ahad..7=Sabtu)
+  return 'SDT'+pad(d.getDate())+pad(d.getMonth()+1)+pad(d.getFullYear()%100)+
+         pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds())+(d.getDay()+1);
+}
+// Hanya karakter yang bisa ditampilkan OLED; tanpa baris baru
+function clean(s){ return s.replace(/[\r\n]+/g,' ').replace(/[‘’]/g,"'").replace(/[“”]/g,'"')
+  .normalize('NFKD').replace(/[^\x20-\x7E]/g,''); }
+function val(id){
+  const el = $(id);
+  if (el.type==='checkbox') return el.checked ? '1' : '0';
+  if (id==='NTZ') return el.value==='custom' ? ($('tzCustom').value||'7') : el.value;
+  return String(el.value).trim();
+}
+function setTZ(tz){
+  const s=$('NTZ');
+  if ([7,8,9].includes(tz)){ s.value=String(tz); $('tzCustomWrap').style.display='none'; }
+  else { s.value='custom'; $('tzCustom').value=tz; $('tzCustomWrap').style.display='block'; }
+}
+function sendGroup(ids){
+  const bad = ids.filter(id=>{ const v=val(id); return v==='' || isNaN(Number(v)); });
+  if (bad.length){ toast('Isi semua kolom dengan angka'); return; }
+  if (send(ids.map(id=>id+val(id)))){ clean_dirty(ids); setTimeout(()=>send(['RPR'],true), 900); }
+}
+function updCount(){
+  document.querySelectorAll('textarea').forEach(t=>{ t.nextElementSibling.textContent = `${t.value.length}/149`; });
+  $('cmnCount').textContent = `${cmnText().length}/74`;
+}
+function cmnText(){ return clean([$('mNama').value.trim(), $('mAlamat').value.trim()].filter(Boolean).join(' ')).slice(0,74); }
+
+// ===================== Navigasi =====================
+function go(name){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  const s = $('s-'+name); s.classList.add('active');
+  $('title').textContent = s.dataset.title || 'JWS Bluetooth';
+  $('backBtn').style.display = name==='home' ? 'none' : 'block';
+  window.scrollTo(0,0);
+  if (name!=='home') history.pushState({s:name},'');
+}
+document.querySelectorAll('[data-go]').forEach(t=>t.onclick=()=>go(t.dataset.go));
+$('backBtn').onclick = ()=>history.back();
+window.onpopstate = ()=>{ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  $('s-home').classList.add('active'); $('title').textContent='JWS Bluetooth'; $('backBtn').style.display='none'; };
+
+// ===================== Tombol =====================
+$('btnConnect').onclick = connect;
+$('btnRead').onclick = ()=>send(['RPR'],true);
+$('btnSync').onclick = ()=>{ if(send([sdtFrom(new Date())])) setTimeout(()=>send(['RPR'],true),900); };
+$('btnManualTime').onclick = ()=>{
+  const d=$('mDate').value, t=$('mTime').value;
+  if(!d||!t){ toast('Isi tanggal dan jam'); return; }
+  const [Y,M,D]=d.split('-').map(Number), [h,m,s=0]=t.split(':').map(Number);
+  if(send([sdtFrom(new Date(Y,M-1,D,h,m,s))])) setTimeout(()=>send(['RPR'],true),900);
+};
+$('NTZ').onchange = ()=>{ $('tzCustomWrap').style.display = $('NTZ').value==='custom'?'block':'none'; };
+$('btnGps').onclick = ()=>{
+  if(!navigator.geolocation){ toast('GPS tidak tersedia'); return; }
+  $('gpsInfo').textContent='Mencari lokasi…';
+  navigator.geolocation.getCurrentPosition(p=>{
+    $('NLA').value = p.coords.latitude.toFixed(5);
+    $('NLO').value = p.coords.longitude.toFixed(5);
+    if (p.coords.altitude!=null) $('NAL').value = Math.round(p.coords.altitude);
+    setTZ(-new Date().getTimezoneOffset()/60);
+    $('gpsInfo').textContent = `Akurasi ±${Math.round(p.coords.accuracy)} m`;
+  }, e=>{ $('gpsInfo').textContent='Gagal ambil GPS: '+e.message; }, {enableHighAccuracy:true, timeout:15000});
+};
+$('qSync').onclick = ()=>{
+  const n=new Date();
+  if(send([sdtFrom(n)],true)){
+    $('qInfo').textContent=`Jam terkirim: ${pad(n.getHours())}:${pad(n.getMinutes())}:${pad(n.getSeconds())}`;
+    toast('Jam tersinkron'); setTimeout(()=>send(['RPR'],true),900);
+  }
+};
+$('qGps').onclick = ()=>{
+  if(!device || !device.gatt.connected){ toast('Belum terhubung ke JWS'); return; }
+  if(!navigator.geolocation){ toast('GPS tidak tersedia'); return; }
+  $('qInfo').textContent='Mencari lokasi GPS…';
+  navigator.geolocation.getCurrentPosition(p=>{
+    const la=p.coords.latitude.toFixed(5), lo=p.coords.longitude.toFixed(5);
+    const tz=-new Date().getTimezoneOffset()/60;
+    const cmds=['NLA'+la,'NLO'+lo,'NTZ'+tz];
+    if(p.coords.altitude!=null) cmds.push('NAL'+Math.round(p.coords.altitude));
+    $('NLA').value=la; $('NLO').value=lo; setTZ(tz);
+    if(p.coords.altitude!=null) $('NAL').value=Math.round(p.coords.altitude);
+    if(send(cmds,true)){
+      $('qInfo').textContent=`Lokasi terkirim: ${la}, ${lo} · GMT+${tz}`+
+        (p.coords.altitude!=null?` · ${Math.round(p.coords.altitude)} m`:' · ketinggian tidak berubah')+
+        ` (±${Math.round(p.coords.accuracy)} m)`;
+      toast('Lokasi terkirim'); setTimeout(()=>send(['RPR'],true),1200);
+    }
+  }, e=>{ $('qInfo').textContent='Gagal ambil GPS: '+e.message+'. Izinkan akses lokasi untuk Bluefy di Settings.'; },
+  {enableHighAccuracy:true, timeout:15000});
+};
+$('btnLokasi').onclick = ()=>sendGroup(['NLA','NLO','NAL','NTZ']);
+$('btnJenis').onclick = ()=>sendGroup(['NMT']);
+$('btnNama').onclick = ()=>{ const t=cmnText(); if(!t){toast('Nama masih kosong');return;} if(send(['CMN'+t])) clean_dirty(['mNama','mAlamat']); };
+document.querySelectorAll('[data-send]').forEach(b=>b.onclick=()=>{ const id=b.dataset.send; if(send([id+clean($(id).value).slice(0,149)])) clean_dirty([id]); });
+document.querySelectorAll('[data-clear]').forEach(b=>b.onclick=()=>{ b.dataset.clear.split(',').forEach(id=>$(id).value=''); updCount(); });
+document.querySelectorAll('[data-group]').forEach(b=>b.onclick=()=>sendGroup(b.dataset.group.split(',')));
+$('btnDefIqomah').onclick = ()=>{ Object.entries({NI1:15,NI4:10,NI5:10,NI6:7,NI7:10}).forEach(([k,v])=>$(k).value=v); };
+$('btnDefJadwal').onclick = ()=>{ Object.entries({NIH:2,NCH:0,NIS:0,NIL:0,NIA:0,NIM:0,NII:0}).forEach(([k,v])=>$(k).value=v); };
+$('btnDefSistem').onclick = ()=>{ $('NSO').value=10; $('NJM').value=30; ['NBZ','NSI','NST','NSU'].forEach(k=>$(k).checked=true); };
+$('btnDefBL').onclick = ()=>{ $('NBL').value=20; $('blVal').textContent=20; };
+$('NBL').oninput = ()=>{ $('blVal').textContent=$('NBL').value; };
+$('btnRaw').onclick = ()=>{ const c=$('rawCmd').value.trim(); if(c){ send([clean(c)],true); $('rawCmd').value=''; } };
+$('rawCmd').onkeydown = e=>{ if(e.key==='Enter') $('btnRaw').click(); };
+$('btnClearLog').onclick = ()=>{ $('log').textContent=''; };
+document.querySelectorAll('textarea,#mNama,#mAlamat').forEach(t=>t.addEventListener('input',updCount));
+document.querySelectorAll('input,textarea,select').forEach(el=>{
+  el.addEventListener('input',()=>{ el.dataset.dirty='1'; });
+  el.addEventListener('change',()=>{ el.dataset.dirty='1'; });
+});
+function clean_dirty(ids){ ids.forEach(id=>{ if($(id)) delete $(id).dataset.dirty; }); }
+
+// ===================== Jam =====================
+function tick(){
+  const n=new Date();
+  $('phoneClock').textContent = `${pad(n.getHours())}:${pad(n.getMinutes())}:${pad(n.getSeconds())}`;
+  $('phoneDate').textContent = n.toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  if (devTime){
+    const d=new Date(devTime.getTime()+(Date.now()-devTimeAt));
+    $('devClock').textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    const dd=$('devDate').dataset;
+    $('devDate').textContent = `${dd.hari||''}, ${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}` + (dd.hijri?` · ${dd.hijri}`:'');
+  }
+}
+setInterval(tick,500); tick();
+const today=new Date(); $('mDate').value=`${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+$('mTime').value=`${pad(today.getHours())}:${pad(today.getMinutes())}:00`;
+updCount();
+if (!navigator.bluetooth){ $('noBle').style.display='block'; $('btnConnect').disabled=true; }
+</script>
+</body>
+</html>
