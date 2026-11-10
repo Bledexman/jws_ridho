@@ -89,7 +89,8 @@
         <button class="b" id="qSync">🕒 Sinkron Jam HP</button>
         <button class="b" id="qGps">📍 Kirim Lokasi GPS</button>
       </div>
-      <p class="muted" id="qInfo" style="margin:10px 0 0">Jam dan lokasi diambil langsung dari HP lalu dikirim ke JWS.</p>
+      <div class="btns"><button class="b sec" id="qWx">⛅ Perbarui Cuaca 7 Hari</button></div>
+      <p class="muted" id="qInfo" style="margin:10px 0 0">Jam, lokasi dan cuaca diambil dari HP lalu dikirim ke JWS. Cuaca diperbarui otomatis saat terhubung.</p>
     </div>
 
     <div class="card">
@@ -97,6 +98,11 @@
       <div class="big" id="devClock">--:--:--</div>
       <p class="muted" id="devDate" style="text-align:center;margin:4px 0 12px">-</p>
       <div class="sched" id="sched"></div>
+      <div class="row" style="margin-top:12px">
+        <div class="sched" style="grid-template-columns:1fr"><div><b id="roomT">-</b><span>Suhu ruang</span></div></div>
+        <div class="sched" style="grid-template-columns:1fr"><div><b id="roomH">-</b><span>Kelembapan</span></div></div>
+      </div>
+      <p class="muted" id="wxInfo" style="text-align:center;margin:10px 0 0">Cuaca: -</p>
     </div>
 
     <div class="grid">
@@ -110,7 +116,7 @@
       <div class="tile" data-go="kecerahan"><span class="ic">🔆</span>Kecerahan</div>
       <div class="tile" data-go="serial"><span class="ic">⌨️</span>Serial</div>
     </div>
-    <p class="muted" style="text-align:center;margin-top:16px">Protokol sama dengan aplikasi Android “JWS Bluetooth”.<br>Program JWS: Modifikasi by M. Ridho | 2026.</p>
+    <p class="muted" style="text-align:center;margin-top:16px">Protokol sama dengan aplikasi Android “JWS Bluetooth”.<br>Program JWS: MFH Robotic · modifikasi Alim Mulyadi.</p>
   </section>
 
   <!-- ================= WAKTU & TANGGAL ================= -->
@@ -160,7 +166,8 @@
   <section class="screen" id="s-masjid" data-title="Nama Masjid">
     <div class="card">
       <label>Jenis</label>
-      <select id="NMT"><option value="1">Masjid</option><option value="2">Musholla</option><option value="3">Surau</option><option value="4">Langgar</option></select>
+      <select id="NMT"><option value="1">Masjid</option><option value="2">Musholla</option><option value="3">Surau</option><option value="4">Langgar</option><option value="0">Blank (tanpa jenis)</option></select>
+      <p class="muted" style="margin:8px 0 0">Blank: running text hanya menampilkan teks Nama &amp; Alamat apa adanya. Kosongkan Nama &amp; Alamat jika tidak ingin menampilkan nama masjid sama sekali.</p>
       <div class="btns"><button class="b" id="btnJenis">Kirim Jenis</button></div>
     </div>
     <div class="card">
@@ -242,6 +249,18 @@
         <button class="b" data-group="NSO,NJM,NBZ,NSI,NST,NSU">Kirim</button>
       </div>
     </div>
+    <div class="card">
+      <h2>Sensor suhu ruang &amp; layar sentuh</h2>
+      <p class="muted" style="margin-top:0">Koreksi jika pembacaan sensor berbeda dengan termometer acuan.</p>
+      <div class="row">
+        <div><label>Koreksi suhu (°C)</label><input id="XTO" type="number" step="0.1" min="-10" max="10" value="0"></div>
+        <div><label>Koreksi kelembapan (%)</label><input id="XHO" type="number" step="0.5" min="-20" max="20" value="0"></div>
+      </div>
+      <div class="btns">
+        <button class="b sec" id="btnCal">Kalibrasi Layar Sentuh</button>
+        <button class="b" data-group="XTO,XHO">Kirim Koreksi</button>
+      </div>
+    </div>
   </section>
 
   <!-- ================= KECERAHAN ================= -->
@@ -299,7 +318,7 @@ async function connect(){
   try{
     device = await navigator.bluetooth.requestDevice({
       filters:[{namePrefix:'JWS'},{services:[NUS]}], optionalServices:[NUS]});
-    device.addEventListener('gattserverdisconnected', ()=>{ setConnected(false); toast('Bluetooth terputus'); });
+    device.addEventListener('gattserverdisconnected', ()=>{ window.__wxDone=false; setConnected(false); toast('Bluetooth terputus'); });
     const server = await device.gatt.connect();
     const svc = await server.getPrimaryService(NUS);
     rxChar = await svc.getCharacteristic(NUS_RX);
@@ -311,17 +330,15 @@ async function connect(){
   }catch(e){ if(e.name!=='NotFoundError') toast('Gagal: '+e.message); }
 }
 
-// Kirim beberapa baris perintah; dipecah 20 byte agar aman di semua HP
+// Kirim beberapa baris perintah (setiap baris dikirim utuh)
 function send(lines, quiet){
   if (!device || !device.gatt.connected){ toast('Belum terhubung ke JWS'); return false; }
   for (const line of lines){
     const data = new TextEncoder().encode(line + '\n');
     writeChain = writeChain.then(async ()=>{
-      for (let i=0;i<data.length;i+=20){
-        const part = data.slice(i,i+20);
-        if (rxChar.writeValueWithResponse) await rxChar.writeValueWithResponse(part);
-        else await rxChar.writeValue(part);
-      }
+      // satu baris = satu write (maks 512 byte) agar tidak tercampur dengan perangkat lain
+      if (rxChar.writeValueWithResponse) await rxChar.writeValueWithResponse(data);
+      else await rxChar.writeValue(data);
       log('→', line);
       await new Promise(r=>setTimeout(r,60));
     }).catch(e=>{ toast('Gagal kirim: '+e.message); });
@@ -342,6 +359,7 @@ function onData(chunk){
 let devTime = null, devTimeAt = 0;
 function handleLine(line){
   log('←', line);
+  if (line==='END' && !window.__wxDone){ window.__wxDone = true; setTimeout(()=>syncWeather(false), 300); }
   const k = line.slice(0,3), v = line.slice(3);
   if (k==='TIM'){            // dd/mm/yyyy HH:MM:SS D
     const m = v.match(/(\d+)\/(\d+)\/(\d+) (\d+):(\d+):(\d+) (\d)/);
@@ -353,6 +371,20 @@ function handleLine(line){
   } else if (k==='HIJ'){
     const [d,mo,y] = v.split(',').map(Number);
     $('devDate').dataset.hijri = `${d} ${BULAN_H[mo-1]||''} ${y} H`;
+  } else if (k==='RTC'){
+    const ok = v==='OK';
+    $('devInfo').innerHTML = `Terhubung ke <b>${device ? (device.name||'JWS') : 'JWS'}</b> · RTC: ` +
+      (ok ? '<b style="color:#0f6b4b">OK</b>' : '<b style="color:#b3261e">ERROR</b> (DS3231 tidak terbaca, cek kabel SDA→GPIO6, SCL→GPIO7, VCC, GND; jam memakai jam internal)');
+  } else if (k==='SEN'){
+    const [t,h,n] = v.split(',');
+    $('roomT').textContent = t==='-' ? '-' : t+'°C'; $('roomH').textContent = h==='-' ? '-' : Math.round(+h)+'%';
+  } else if (k==='WXU'){
+    const [u,c] = v.split(',');
+    $('wxInfo').textContent = u ? `Cuaca tersimpan di JWS: ${c} hari · diperbarui ${u}` : 'Cuaca belum pernah disinkron';
+  } else if (k==='XTO' || k==='XHO'){
+    if (!$(k).dataset.dirty) $(k).value = parseFloat(v);
+  } else if (k==='OKW'){
+    toast('Cuaca terkirim ke JWS');
   } else if (k==='CMN'){
     if ($('mNama').dataset.dirty || $('mAlamat').dataset.dirty) return;
     $('mNama').value = v; $('mAlamat').value=''; updCount();
@@ -458,20 +490,42 @@ $('qGps').onclick = ()=>{
       $('qInfo').textContent=`Lokasi terkirim: ${la}, ${lo} · GMT+${tz}`+
         (p.coords.altitude!=null?` · ${Math.round(p.coords.altitude)} m`:' · ketinggian tidak berubah')+
         ` (±${Math.round(p.coords.accuracy)} m)`;
-      toast('Lokasi terkirim'); setTimeout(()=>send(['RPR'],true),1200);
+      toast('Lokasi terkirim'); setTimeout(()=>send(['RPR'],true),1200); setTimeout(()=>syncWeather(false),2500);
     }
   }, e=>{ $('qInfo').textContent='Gagal ambil GPS: '+e.message+'. Izinkan akses lokasi untuk Bluefy di Settings.'; },
   {enableHighAccuracy:true, timeout:15000});
 };
+const pad8 = s => s.replace(/-/g,'');
+async function syncWeather(manual){
+  if(!device || !device.gatt.connected){ if(manual) toast('Belum terhubung ke JWS'); return; }
+  const lat = parseFloat($('NLA').value), lon = parseFloat($('NLO').value);
+  if (isNaN(lat) || isNaN(lon)){ if(manual) toast('Lokasi JWS belum diketahui'); return; }
+  $('qInfo').textContent = 'Mengambil prakiraan cuaca…';
+  try{
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`+
+      `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=7`;
+    const r = await fetch(url); if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = (await r.json()).daily;
+    const lines = ['WCLR'];
+    d.time.forEach((t,i)=>lines.push(`WD${pad8(t)},${d.weather_code[i]},${Math.round(d.temperature_2m_max[i])},${Math.round(d.temperature_2m_min[i])},${d.precipitation_probability_max[i]??0}`));
+    const n = new Date();
+    lines.push(`WEND${pad(n.getDate())}/${pad(n.getMonth()+1)} ${pad(n.getHours())}:${pad(n.getMinutes())}`);
+    send(lines, true);
+    $('qInfo').textContent = `Cuaca 7 hari terkirim (${d.time[0]} s/d ${d.time[d.time.length-1]})`;
+    setTimeout(()=>send(['RPR'],true), 1500);
+  }catch(e){ $('qInfo').textContent = 'Gagal ambil cuaca (cek internet): '+e.message; }
+}
+$('qWx').onclick = ()=>syncWeather(true);
 $('btnLokasi').onclick = ()=>sendGroup(['NLA','NLO','NAL','NTZ']);
 $('btnJenis').onclick = ()=>sendGroup(['NMT']);
-$('btnNama').onclick = ()=>{ const t=cmnText(); if(!t){toast('Nama masih kosong');return;} if(send(['CMN'+t])) clean_dirty(['mNama','mAlamat']); };
+$('btnNama').onclick = ()=>{ const t=cmnText(); if(send(['CMN'+t])){ clean_dirty(['mNama','mAlamat']); if(!t) toast('Nama masjid dikosongkan'); } };
 document.querySelectorAll('[data-send]').forEach(b=>b.onclick=()=>{ const id=b.dataset.send; if(send([id+clean($(id).value).slice(0,149)])) clean_dirty([id]); });
 document.querySelectorAll('[data-clear]').forEach(b=>b.onclick=()=>{ b.dataset.clear.split(',').forEach(id=>$(id).value=''); updCount(); });
 document.querySelectorAll('[data-group]').forEach(b=>b.onclick=()=>sendGroup(b.dataset.group.split(',')));
 $('btnDefIqomah').onclick = ()=>{ Object.entries({NI1:15,NI4:10,NI5:10,NI6:7,NI7:10}).forEach(([k,v])=>$(k).value=v); };
 $('btnDefJadwal').onclick = ()=>{ Object.entries({NIH:2,NCH:0,NIS:0,NIL:0,NIA:0,NIM:0,NII:0}).forEach(([k,v])=>$(k).value=v); };
 $('btnDefSistem').onclick = ()=>{ $('NSO').value=10; $('NJM').value=30; ['NBZ','NSI','NST','NSU'].forEach(k=>$(k).checked=true); };
+$('btnCal').onclick = ()=>{ if(send(['XCAL'],true)) toast('Sentuh tanda panah di layar JWS'); };
 $('btnDefBL').onclick = ()=>{ $('NBL').value=20; $('blVal').textContent=20; };
 $('NBL').oninput = ()=>{ $('blVal').textContent=$('NBL').value; };
 $('btnRaw').onclick = ()=>{ const c=$('rawCmd').value.trim(); if(c){ send([clean(c)],true); $('rawCmd').value=''; } };
