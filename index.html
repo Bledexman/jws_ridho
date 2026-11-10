@@ -116,7 +116,7 @@
       <div class="tile" data-go="kecerahan"><span class="ic">🔆</span>Kecerahan</div>
       <div class="tile" data-go="serial"><span class="ic">⌨️</span>Serial</div>
     </div>
-    <p class="muted" style="text-align:center;margin-top:16px">Protokol sama dengan aplikasi Android “JWS Bluetooth”.<br>Program JWS: MFH Robotic · modifikasi M. Ridho.</p>
+    <p class="muted" style="text-align:center;margin-top:16px">Protokol sama dengan aplikasi Android “JWS Bluetooth”.<br>Program JWS: MFH Robotic · modifikasi Alim Mulyadi.</p>
   </section>
 
   <!-- ================= WAKTU & TANGGAL ================= -->
@@ -304,6 +304,15 @@ const BULAN_H = ['Muharram','Shafar','Rabiul Awal','Rabiul Akhir','Jumadil Awal'
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),1800); }
 function log(dir, s){ const l=$('log'); l.textContent += `${dir} ${s}\n`; l.scrollTop=l.scrollHeight; }
 
+function autoSync(reason){
+  setTimeout(()=>{
+    if (send([sdtFrom(new Date())], true)){
+      toast('Jam JWS disinkron otomatis (' + reason + ')');
+      setTimeout(()=>send(['RPR'],true), 1200);
+    }
+  }, 400);
+}
+
 function setConnected(on){
   $('status').textContent = on ? 'Terhubung' : 'Tidak terhubung';
   $('status').classList.toggle('on', on);
@@ -318,7 +327,7 @@ async function connect(){
   try{
     device = await navigator.bluetooth.requestDevice({
       filters:[{namePrefix:'JWS'},{services:[NUS]}], optionalServices:[NUS]});
-    device.addEventListener('gattserverdisconnected', ()=>{ window.__wxDone=false; setConnected(false); toast('Bluetooth terputus'); });
+    device.addEventListener('gattserverdisconnected', ()=>{ window.__wxDone=false; window.__autoSynced=false; setConnected(false); toast('Bluetooth terputus'); });
     const server = await device.gatt.connect();
     const svc = await server.getPrimaryService(NUS);
     rxChar = await svc.getCharacteristic(NUS_RX);
@@ -364,7 +373,10 @@ function handleLine(line){
   if (k==='TIM'){            // dd/mm/yyyy HH:MM:SS D
     const m = v.match(/(\d+)\/(\d+)\/(\d+) (\d+):(\d+):(\d+) (\d)/);
     if (m){ devTime = new Date(+m[3],m[2]-1,+m[1],+m[4],+m[5],+m[6]); devTimeAt = Date.now();
-      $('devDate').dataset.hari = HARI[+m[7]] || ''; }
+      $('devDate').dataset.hari = HARI[+m[7]] || '';
+      // Sinkron otomatis bila jam JWS selisih > 5 detik dari jam HP/laptop (sekali per koneksi)
+      const diff = Math.abs(devTime.getTime() - Date.now()) / 1000;
+      if (diff > 5 && !window.__autoSynced){ window.__autoSynced = true; autoSync('selisih ' + Math.round(diff) + ' detik'); } }
   } else if (k==='JWS'){
     const t = v.split(',');
     $('sched').innerHTML = t.map((x,i)=>`<div><b>${x}</b><span>${SHOLAT[i]}</span></div>`).join('');
@@ -372,9 +384,10 @@ function handleLine(line){
     const [d,mo,y] = v.split(',').map(Number);
     $('devDate').dataset.hijri = `${d} ${BULAN_H[mo-1]||''} ${y} H`;
   } else if (k==='RTC'){
-    const ok = v==='OK';
+    if (v==='STALE' && !window.__autoSynced){ window.__autoSynced = true; autoSync('jam RTC sempat berhenti'); }
+    const ok = v==='OK' || v==='STALE';
     $('devInfo').innerHTML = `Terhubung ke <b>${device ? (device.name||'JWS') : 'JWS'}</b> · RTC: ` +
-      (ok ? '<b style="color:#0f6b4b">OK</b>' : '<b style="color:#b3261e">ERROR</b> (DS3231 tidak terbaca, cek kabel SDA→GPIO6, SCL→GPIO7, VCC, GND; jam memakai jam internal)');
+      (v==='STALE' ? '<b style="color:#b4541a">disinkron ulang</b> (osilator sempat berhenti, cek baterai CR2032)' : ok ? '<b style="color:#0f6b4b">OK</b>' : '<b style="color:#b3261e">ERROR</b> (DS3231 tidak terbaca, cek kabel SDA→GPIO6, SCL→GPIO7, VCC, GND; jam memakai jam internal)');
   } else if (k==='SEN'){
     const [t,h,n] = v.split(',');
     $('roomT').textContent = t==='-' ? '-' : t+'°C'; $('roomH').textContent = h==='-' ? '-' : Math.round(+h)+'%';
