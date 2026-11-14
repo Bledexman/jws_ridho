@@ -89,7 +89,7 @@
         <button class="b" id="qSync">🕒 Sinkron Jam HP</button>
         <button class="b" id="qGps">📍 Kirim Lokasi GPS</button>
       </div>
-      <div class="btns"><button class="b sec" id="qWx">⛅ Perbarui Cuaca 7 Hari</button></div>
+      <div class="btns"><button class="b sec" id="qWx">⛅ Perbarui Cuaca 30 Hari</button></div>
       <p class="muted" id="qInfo" style="margin:10px 0 0">Jam, lokasi dan cuaca diambil dari HP lalu dikirim ke JWS. Cuaca diperbarui otomatis saat terhubung.</p>
     </div>
 
@@ -116,7 +116,7 @@
       <div class="tile" data-go="kecerahan"><span class="ic">🔆</span>Kecerahan</div>
       <div class="tile" data-go="serial"><span class="ic">⌨️</span>Serial</div>
     </div>
-    <p class="muted" style="text-align:center;margin-top:16px">Protokol sama dengan aplikasi Android “JWS Bluetooth”.<br>Program JWS: Developed by: M. Ridho.</p>
+    <p class="muted" style="text-align:center;margin-top:16px">Protokol sama dengan aplikasi Android “JWS Bluetooth”.<br>Program JWS: MFH Robotic · modifikasi Alim Mulyadi.</p>
   </section>
 
   <!-- ================= WAKTU & TANGGAL ================= -->
@@ -393,7 +393,11 @@ function handleLine(line){
     $('roomT').textContent = t==='-' ? '-' : t+'°C'; $('roomH').textContent = h==='-' ? '-' : Math.round(+h)+'%';
   } else if (k==='WXU'){
     const [u,c] = v.split(',');
-    $('wxInfo').textContent = u ? `Cuaca tersimpan di JWS: ${c} hari · diperbarui ${u}` : 'Cuaca belum pernah disinkron';
+    window.__wxU = u ? `${c} hari · diperbarui ${u}` : '';
+    $('wxInfo').textContent = u ? `Cuaca tersimpan di JWS${window.__wxL ? ' (' + window.__wxL + ')' : ''}: ${window.__wxU}` : 'Cuaca belum pernah disinkron';
+  } else if (k==='WXL'){
+    window.__wxL = v;
+    if (window.__wxU) $('wxInfo').textContent = `Cuaca tersimpan di JWS${v ? ' (' + v + ')' : ''}: ${window.__wxU}`;
   } else if (k==='XTO' || k==='XHO'){
     if (!$(k).dataset.dirty) $(k).value = parseFloat(v);
   } else if (k==='OKW'){
@@ -509,23 +513,83 @@ $('qGps').onclick = ()=>{
   {enableHighAccuracy:true, timeout:15000});
 };
 const pad8 = s => s.replace(/-/g,'');
+// Nama kota dari koordinat (BigDataCloud, gratis tanpa API key, khusus dari browser)
+async function cityName(lat, lon){
+  try{
+    const r = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=id`);
+    if(!r.ok) return '';
+    const j = await r.json();
+    const n = j.city || j.locality || j.principalSubdivision || '';
+    return clean(n.replace(/^(Kota|Kabupaten)\s+/i,'')).slice(0,25);
+  }catch(e){ return ''; }
+}
+// ---- Cuaca 30 hari ----
+// Hari 1-16 : Open-Meteo Forecast API (detail: kode cuaca & peluang hujan)
+// Hari 17-30: Open-Meteo Seasonal API, model ECMWF EC46 (ensemble -> tren, akurasi rendah)
+async function fetchSeasonal(lat, lon){
+  const base = `https://seasonal-api.open-meteo.com/v1/seasonal?latitude=${lat}&longitude=${lon}` +
+               `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto`;
+  for (const u of [base + '&models=ecmwf_ec46&forecast_days=45', base + '&forecast_days=45', base]){
+    try{
+      const r = await fetch(u);
+      if (r.ok){ const j = await r.json(); if (j.daily && j.daily.time) return j.daily; }
+    }catch(e){}
+  }
+  return null;
+}
+// nilai semua anggota ensemble (kunci "nama" atau "nama_memberNN") pada hari ke-i
+function members(daily, name, i){
+  const v = [];
+  for (const k in daily){
+    if ((k === name || k.startsWith(name + '_member')) && Array.isArray(daily[k]) && daily[k][i] != null) v.push(daily[k][i]);
+  }
+  return v;
+}
+const avg = a => a.reduce((s,x)=>s+x,0) / a.length;
+function trendDay(daily, i){
+  const mx = members(daily,'temperature_2m_max',i), mn = members(daily,'temperature_2m_min',i), pr = members(daily,'precipitation_sum',i);
+  if (!mx.length || !mn.length) return null;
+  const rain = pr.length ? Math.round(100 * pr.filter(x=>x >= 1).length / pr.length) : 0;
+  const code = rain >= 60 ? 61 : rain >= 30 ? 80 : 2;          // hujan / hujan lokal / berawan
+  return {code, tmax: Math.round(avg(mx)), tmin: Math.round(avg(mn)), rain};
+}
+
 async function syncWeather(manual){
   if(!device || !device.gatt.connected){ if(manual) toast('Belum terhubung ke JWS'); return; }
   const lat = parseFloat($('NLA').value), lon = parseFloat($('NLO').value);
   if (isNaN(lat) || isNaN(lon)){ if(manual) toast('Lokasi JWS belum diketahui'); return; }
-  $('qInfo').textContent = 'Mengambil prakiraan cuaca…';
+  $('qInfo').textContent = 'Mengambil prakiraan cuaca 30 hari…';
   try{
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`+
-      `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=7`;
-    const r = await fetch(url); if(!r.ok) throw new Error('HTTP '+r.status);
+      `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=16`;
+    const [r, kota, sea] = await Promise.all([fetch(url), cityName(lat, lon), fetchSeasonal(lat, lon)]);
+    if(!r.ok) throw new Error('HTTP '+r.status);
     const d = (await r.json()).daily;
     const lines = ['WCLR'];
-    d.time.forEach((t,i)=>lines.push(`WD${pad8(t)},${d.weather_code[i]},${Math.round(d.temperature_2m_max[i])},${Math.round(d.temperature_2m_min[i])},${d.precipitation_probability_max[i]??0}`));
+    const have = new Set();
+    d.time.forEach((t,i)=>{
+      if (lines.length > 30) return;
+      have.add(t);
+      lines.push(`WD${pad8(t)},${d.weather_code[i]},${Math.round(d.temperature_2m_max[i])},${Math.round(d.temperature_2m_min[i])},${d.precipitation_probability_max[i]??0}`);
+    });
+    let nTrend = 0;
+    if (sea){
+      sea.time.forEach((t,i)=>{
+        if (lines.length > 30 || have.has(t) || t < d.time[0]) return;
+        const td = trendDay(sea, i);
+        if (!td) return;
+        have.add(t); nTrend++;
+        lines.push(`WD${pad8(t)},${td.code},${td.tmax},${td.tmin},${td.rain},1`);
+      });
+    }
+    if (kota) lines.push('WLOC' + kota);
     const n = new Date();
+    const total = lines.length - 1 - (kota ? 1 : 0);
     lines.push(`WEND${pad(n.getDate())}/${pad(n.getMonth()+1)} ${pad(n.getHours())}:${pad(n.getMinutes())}`);
     send(lines, true);
-    $('qInfo').textContent = `Cuaca 7 hari terkirim (${d.time[0]} s/d ${d.time[d.time.length-1]})`;
-    setTimeout(()=>send(['RPR'],true), 1500);
+    $('qInfo').textContent = `Cuaca ${total} hari${kota ? ' ' + kota : ''} terkirim` +
+      (nTrend ? ` (16 hari detail + ${nTrend} hari tren)` : sea === null ? ' (data tren hari ke-17+ tidak tersedia)' : '');
+    setTimeout(()=>send(['RPR'],true), 2500);
   }catch(e){ $('qInfo').textContent = 'Gagal ambil cuaca (cek internet): '+e.message; }
 }
 $('qWx').onclick = ()=>syncWeather(true);
